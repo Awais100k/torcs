@@ -46,7 +46,6 @@ class Driver(object):
         # Open a CSV log file and write a header.
         self.log_file = open("client_log.csv", "a", newline="")
         self.csv_writer = csv.writer(self.log_file, escapechar='\\', quoting=csv.QUOTE_MINIMAL)
-        # If file is empty, write header: timestamp, each sensor field, and "Sent".
         if self.log_file.tell() == 0:
             header = ["Timestamp"] + Driver.SENSOR_FIELDS + ["Sent"]
             self.csv_writer.writerow(header)
@@ -59,7 +58,7 @@ class Driver(object):
 
     def init(self):
         '''Return init string with rangefinder angles'''
-        self.angles = [0 for x in range(19)]
+        self.angles = [0 for _ in range(19)]
         for i in range(5):
             self.angles[i] = -90 + i * 15
             self.angles[18 - i] = 90 - i * 15
@@ -69,106 +68,76 @@ class Driver(object):
         return self.parser.stringify({'init': self.angles})
     
     def drive(self, msg):
-        # Get current timestamp.
+        '''Handle one timestep: parse sensors, update controls, log and return command.'''
         current_time = time.time()
-        # Parse the sensor message into a dictionary.
         sensor_dict = self.parser.parse(msg)
-        # Log sensor data into CSV (each field in its own column) plus the sent control message.
-        send_msg = self._log_sensor_data(sensor_dict, current_time)
-        
-        # Update car state based on the sensor message.
+
+        # Update car state and controls
         self.state.setFromMsg(msg)
-        # Process keyboard events (steering, acceleration, braking).
         self.handle_keyboard_input()
-        # Apply automatic gear shifting.
         self.auto_gear()
-        # Form the control message to be sent.
         send_msg = self.control.toMsg()
-        
-        # Optionally, update the log row with the control message if needed.
-        # (For simplicity, here we include the sent message in the same row.)
-        
-        # Process pygame events to keep the window responsive.
+
+        # Log sensors + control action
+        self._log_sensor_and_control(sensor_dict, current_time, send_msg)
+
+        # Keep pygame window responsive and display debug info
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.onShutDown()
                 sys.exit()
-                
-        # Debug: Display key information on the pygame window.
         self.screen.fill((0, 0, 0))
-        font = pygame.font.Font(None, 36)
-        text = font.render(f"Speed: {self.state.getSpeedX()}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 10))
-        text = font.render(f"RPM: {self.state.getRpm()}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 50))
-        text = font.render(f"Gear: {self.state.getGear()}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 90))
-        text = font.render(f"Steer: {self.steer:.2f}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 130))
-        text = font.render(f"Accel: {self.control.getAccel():.2f}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 170))
-        text = font.render(f"Brake: {self.control.getBrake():.2f}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 210))
-        text = font.render(f"Clutch: {self.control.getClutch():.2f}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 250))
-        text = font.render(f"Meta: {self.control.getMeta()}", True, (255, 255, 255))
-        self.screen.blit(text, (10, 290))
+        font = pygame.font.Font(None, 24)
+        info = [
+            f"Speed: {self.state.getSpeedX()}",
+            f"RPM: {self.state.getRpm()}",
+            f"Gear: {self.state.getGear()}",
+            f"Steer: {self.steer:.2f}",
+            f"Accel: {self.control.getAccel():.2f}",
+            f"Brake: {self.control.getBrake():.2f}",
+            f"Clutch: {self.control.getClutch():.2f}",
+            f"Meta: {self.control.getMeta()}"
+        ]
+        y = 10
+        for line in info:
+            text = font.render(line, True, (255, 255, 255))
+            self.screen.blit(text, (10, y))
+            y += 30
         pygame.display.flip()
 
         return send_msg
     
-    def _log_sensor_data(self, sensor_dict, timestamp):
-        """
-        Logs the sensor dictionary to CSV as a single row.
-        Lists are joined by a space.
-        Returns the control message that will be sent (empty here; update later if needed).
-        """
+    def _log_sensor_and_control(self, sensor_dict, timestamp, send_msg):
+        '''Logs a row of sensor values followed by the sent control message.'''
         row = [f"{timestamp:.3f}"]
         for field in Driver.SENSOR_FIELDS:
-            value = sensor_dict.get(field, "")
-            if isinstance(value, list):
-                value = " ".join(str(x) for x in value)
-            row.append(value)
-        # For now, leave the "Sent" field empty; it will be updated after forming the control message.
-        # Alternatively, you can log the sent control message here.
-        row.append("")  
+            val = sensor_dict.get(field, [])
+            if isinstance(val, list):
+                val = " ".join(str(x) for x in val)
+            row.append(val)
+        row.append(send_msg)
         self.csv_writer.writerow(row)
         self.log_file.flush()
-        return ""
-    
+
     def handle_keyboard_input(self):
-        '''Process keyboard events using pygame and the keyboard library for steering and acceleration.
-           Gear shifting is handled automatically.
-        '''
-        # Process pending pygame events (to keep window responsive).
+        '''Process keyboard for steer, accel, brake; gear auto-handled.'''
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.onShutDown()
                 sys.exit()
-        
         keys = pygame.key.get_pressed()
-        
-        # Get current speed from car state.
-        speed = self.state.getSpeedX() if self.state.getSpeedX() is not None else 0.0
-        accel = self.control.getAccel()  # current acceleration value
+        speed = self.state.getSpeedX() or 0.0
+        accel = self.control.getAccel()
         gear = self.manual_gear
-        
-        # Steering control using the keyboard library.
+        # steering
         if keyboard.is_pressed('a'):
-            self.steer += 0.1
-            if self.steer > 1.0:
-                self.steer = 1.0
-            self.control.setSteer(self.steer)
+            self.steer = max(self.steer + 0.1, -1.0)
         elif keyboard.is_pressed('d'):
-            self.steer -= 0.1
-            if self.steer < -1.0:
-                self.steer = -1.0
-            self.control.setSteer(self.steer)
+            self.steer = min(self.steer - 0.1, 1.0)
         else:
             self.steer = 0.0
-            self.control.setSteer(self.steer)
-        
-        # Acceleration/Braking and Reverse logic.
+        self.control.setSteer(self.steer)
+        # brake/reverse
         if keyboard.is_pressed('s'):
             if gear >= 1 and speed > 0.1:
                 self.control.setBrake(1.0)
@@ -177,10 +146,7 @@ class Driver(object):
                 if gear != -1:
                     self.manual_gear = -1
                     self.control.setGear(-1)
-                    accel = 0.0
-                accel += 0.1
-                if accel > 1.0:
-                    accel = 1.0
+                accel = min(accel + 0.1, 1.0)
                 self.control.setBrake(0.0)
                 self.control.setAccel(accel)
         elif keyboard.is_pressed('w'):
@@ -191,10 +157,7 @@ class Driver(object):
                 if gear < 0:
                     self.manual_gear = 1
                     self.control.setGear(1)
-                    accel = 0.0
-                accel += 0.1
-                if accel > 1.0:
-                    accel = 1.0
+                accel = min(accel + 0.1, 1.0)
                 self.control.setBrake(0.0)
                 self.control.setAccel(accel)
         else:
@@ -203,47 +166,29 @@ class Driver(object):
         self.clock.tick(60)
     
     def auto_gear(self):
-        '''Automatically adjust gears based on RPM for forward gears only.'''
-        # If reverse is engaged in our manual gear, don't change it.
+        '''Auto gear shift logic based on RPM thresholds.'''
         if self.manual_gear < 0:
             return
-
-        rpm = self.state.getRpm()
-        gear = self.manual_gear  # using our manual gear state
-
-        if gear is None:
-            gear = 1
-
+        rpm = self.state.getRpm() or 0.0
+        gear = self.manual_gear
         if self.prev_rpm is None:
             self.prev_rpm = rpm
-
-        current_time = time.time()
-        min_shift_interval = 0.5
-        if hasattr(self, "last_shift_time"):
-            if current_time - self.last_shift_time < min_shift_interval:
-                return
-        else:
-            self.last_shift_time = current_time
-
-        upshift_threshold = 7300
-        downshift_threshold = 2700
-
-        new_gear = gear
-
-        speed = self.state.getSpeedX() if self.state.getSpeedX() is not None else 0.0
-        if abs(speed) < 10:
+        now = time.time()
+        if hasattr(self, 'last_shift_time') and now - self.last_shift_time < 0.5:
             return
-
-        if rpm > upshift_threshold and gear < 6:
-            new_gear = gear + 1
-        elif rpm < downshift_threshold and gear > 1:
-            new_gear = gear - 1
-
+        up_th, down_th = 7300, 2700
+        speed = abs(self.state.getSpeedX() or 0.0)
+        if speed < 10:
+            return
+        new_gear = gear
+        if rpm > up_th and gear < 6:
+            new_gear += 1
+        elif rpm < down_th and gear > 1:
+            new_gear -= 1
         if new_gear != gear:
             self.manual_gear = new_gear
             self.control.setGear(new_gear)
-            self.last_shift_time = current_time
-
+            self.last_shift_time = now
         self.prev_rpm = rpm
 
     def onShutDown(self):

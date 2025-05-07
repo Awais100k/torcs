@@ -94,8 +94,14 @@ def main():
                 sensor_msg = data.decode("utf-8")
                 # Update car state from the sensor message
                 state.setFromMsg(sensor_msg)
+
+                msg_to_send = control.toMsg()
                 # Save raw sensor message to dataset file with timestamp
-                dataset_file.write(f"{time.time()} {sensor_msg}\n")
+                dataset_file.write(
+                    f"{time.time():.3f}  "
+                    f"{sensor_msg}  "
+                    f"{msg_to_send}\n"
+                )
                 dataset_file.flush()
             except socket.timeout:
                 # No sensor message received this iteration
