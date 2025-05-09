@@ -104,3 +104,25 @@ for epoch in range(1, 201):
     val_loss = total_val / len(val_loader.dataset)
 
     print(f"Epoch {epoch:2d}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}")
+
+
+# Grab one batch from the validation set
+xb, yb = next(iter(val_loader))
+xb, yb = xb.to(device), yb.to(device)
+
+model.eval()
+with torch.no_grad():
+    preds = model(xb)
+
+# Compare first 5 examples
+for i in range(5):
+    true = yb[i].cpu().numpy()
+    pred = preds[i].cpu().numpy()
+    print(f"Sample {i}:")
+    print(f"  True → accel {true[0]:.2f}, brake {true[1]:.2f}, steer {true[2]:.2f}, gear {true[3]:.0f}")
+    print(f"  Pred → accel {pred[0]:.2f}, brake {pred[1]:.2f}, steer {pred[2]:.2f}, gear {pred[3]:.0f}")
+    print()
+
+
+
+torch.save(model.state_dict(), 'driving_clone.pt')
