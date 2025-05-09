@@ -47,7 +47,7 @@ sock.settimeout(1.0)
 shutdownClient = False
 curEpisode = 0
 
-verbose = True
+verbose = False
 
 d = driver.Driver(arguments.stage)
 
