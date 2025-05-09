@@ -29,14 +29,14 @@ class Driver(object):
         self.control = carControl.CarControl()
         self.prev_shift_time = 0
         # Hysteresis thresholds
-        self.up_threshold = 7000
+        self.up_threshold = 6000
         self.down_threshold = 3000
         # Steering parameters
         self.steer = 0.0
         self.steer_inc = 0.02
         self.steer_decay = 0.90
         # Acceleration/brake parameters
-        self.accel_step = 0.05
+        self.accel_step = 0.2
         self.accel_decay = 0.95
         # Direction: 1=forward, -1=reverse, 0=neutral
         self.direction = 0
