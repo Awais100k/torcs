@@ -6,6 +6,7 @@ import torch
 import numpy as np
 from model import DrivingMLP
 from data_utils import SENSOR_FIELDS, FIELD_LENGTHS, features_from_msg
+import joblib
 
 if __name__ == '__main__':
     pass
@@ -57,9 +58,12 @@ model = DrivingMLP(input_dim=input_dim).to(device)
 model.load_state_dict(torch.load(arguments.model_path, map_location=device))
 model.eval()
 
+# Load scaler for feature normalization
+scaler = joblib.load('scaler.pkl')
+
 shutdownClient = False
 curEpisode = 0
-verbose = False
+verbose = True
 
 d = driver.Driver(arguments.stage)
 
@@ -89,8 +93,8 @@ while not shutdownClient:
         except socket.error:
             continue
 
-        if verbose:
-            print('Received:', msg)
+        # if verbose:
+            # print('Received:', msg)
 
         if '***shutdown***' in msg:
             d.onShutDown()
@@ -106,11 +110,19 @@ while not shutdownClient:
         if currentStep != arguments.max_steps:
             # Use cloned model for inference
             feat = features_from_msg(msg)
-            tensor = torch.from_numpy(feat).unsqueeze(0).to(device)
+            # Normalize features using the scaler
+            feat_normalized = scaler.transform(feat.reshape(1, -1)).astype(np.float32)
+            tensor = torch.from_numpy(feat_normalized).to(device)
             with torch.no_grad():
-                out = model(tensor).cpu().numpy()[0]
-            accel, brake, steer, gear_pred = out
-            gear_cmd = int(round(gear_pred))
+                control, gear_logits = model(tensor)
+                control = control.cpu().numpy()[0]  # [accel, brake, steer]
+                gear_pred = torch.argmax(gear_logits, dim=1).cpu().numpy()[0] - 1  # Shift back to -1 to 6
+            accel, brake, steer = control
+            # Clamp control outputs to valid ranges
+            accel = np.clip(accel, 0, 1)
+            brake =  0.0 if brake < 0.85 else brake
+            steer = np.clip(steer, -1, 1)
+            gear_cmd = int(gear_pred)
             buf = f"(accel {accel:.3f})(brake {brake:.3f})(steer {steer:.3f})(gear {gear_cmd})"
         else:
             buf = '(meta 1)'

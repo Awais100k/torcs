@@ -11,7 +11,7 @@ class Driver(object):
     '''
     A driver object for the SCRC with manual control using pygame,
     but with automatic and manual gear control.
-    Logs each turn's sensor data and sent control message to CSV.
+    Logs each turn's sensor data and control actions to CSV with uniform format.
     '''
 
     SENSOR_FIELDS = [
@@ -20,6 +20,8 @@ class Driver(object):
         "speedX", "speedY", "speedZ", "track", "trackPos", "wheelSpinVel",
         "z", "focus"
     ]
+    
+    ACTION_FIELDS = ["accel", "brake", "steer", "gear"]
 
     def __init__(self, stage):
         self.stage = stage
@@ -44,7 +46,7 @@ class Driver(object):
         self.log_file = open("client_log.csv", "a", newline="")
         self.csv_writer = csv.writer(self.log_file, escapechar='\\', quoting=csv.QUOTE_MINIMAL)
         if self.log_file.tell() == 0:
-            header = ["Timestamp"] + Driver.SENSOR_FIELDS + ["Sent"]
+            header = ["Timestamp"] + self.SENSOR_FIELDS + self.ACTION_FIELDS
             self.csv_writer.writerow(header)
 
         pygame.init()
@@ -70,7 +72,7 @@ class Driver(object):
         self._handle_accel_brake()
         self._auto_gear()
         action = self.control.toMsg()
-        self._log(sensor_dict, ts, action)
+        self._log(sensor_dict, ts)
         self._render()
         return action
 
@@ -166,12 +168,19 @@ class Driver(object):
         time.sleep(0.05)
         self.control.setAccel(old_acc)
 
-    def _log(self, sd, ts, action):
+    def _log(self, sensor_dict, ts):
         row = [f"{ts:.3f}"]
-        for f in Driver.SENSOR_FIELDS:
-            v = sd.get(f, [])
-            row.append(" ".join(str(x) for x in v) if isinstance(v, list) else v)
-        row.append(action)
+        # Add sensor data
+        for f in self.SENSOR_FIELDS:
+            v = sensor_dict.get(f, [])
+            row.append(" ".join(str(x) for x in v) if isinstance(v, list) else str(v))
+        # Add action data
+        row.extend([
+            str(self.control.getAccel()),
+            str(self.control.getBrake()),
+            str(self.control.getSteer()),
+            str(self.control.getGear())
+        ])
         self.csv_writer.writerow(row)
         self.log_file.flush()
 
